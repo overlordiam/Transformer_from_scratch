@@ -9,9 +9,11 @@ class InputEmbedding(nn.Module):
         self.d_model = d_model
         self.vocab_size = vocab_size
         self.embedding = nn.Embedding(d_model, vocab_size)
+        self.shared_weights = self.embedding.weight
 
     def forward(self, x):
-        return self.embedding(x)*math.sqrt(self.d_model)
+        return self.embedding(x)*math.sqrt(self.d_model), self.shared_weights
+
 
 
 class PositionalEmbedding(nn.Module):
@@ -152,10 +154,10 @@ class EncoderBlock(nn.Module):
         self.feed_forward_block = feed_forward_block
         self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(2)])
 
-    def forward(self, x, mask):
+    def forward(self, x, src_mask):
         # We apply lambda function so that the MutliHeadAttention object executes inside the residual function,
         # which gives data flow. The feed_forward_block does not need the input as it feeds it inside the ResidualConnection class 
-        x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, mask))
+        x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, src_mask))
         x = self.residual_connections[1](x, self.feed_forward_block)
         return x
 
@@ -173,5 +175,48 @@ class Encoder(nn.Module):
         return self.norm(x)
         
     
+class DecoderBlock(nn.Module):
+    # assemble a self attention layer, a cross attention layer and a feed forward layer to form the decoder block
+    def __init__(self, self_attention_block: MutliHeadAttention, cross_attention_block: MutliHeadAttention, feed_forward: FeedForward, dropout: float):
+        super().__init__()
+        self.self_attention_block = self_attention_block
+        self.cross_attention_block = cross_attention_block
+        self.feed_forward = feed_forward
+        self.dropout = dropout
+        self.residual_connections = nn.ModuleList([ResidualConnection(self.dropout) for _ in range(3)])
+
+    def forward(self, x, encoder_output, src_mask, trg_mask):
+        # similar to the encoder
+        x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, trg_mask))
+        x = self.residual_connections[1](x, lambda x: self.cross_attention_block(x, encoder_output, encoder_output, src_mask))
+        x = self.residual_connections[2](x, self.feed_forward)
+        return x
+    
+
+class Decoder(nn.Module):
+    # assemble N stacks of the decoder block
+    def __init__(self, layers):
+        super().__init__()
+        self.layers = layers
+        self.norm = LayerNorm()
+
+    def forward(self, x, encoder_output, src_mask, trg_mask):
+        for layer in self.layers:
+            x = layer(x, encoder_output, src_mask, trg_mask)
+        return self.norm(x)
+    
+
+class Projection(nn.Module):
+    # final layer that maps the output (last dimension -> d_model) from the decoder to the the vocabulary
+    def __init__(self, d_model, vocab_size, shared_weights):
+        # the linear layer uses the same weights as the embedding layer
+        super().__init__()
+        self.linear = nn.Linear(d_model, vocab_size)
+        self.linear.weight = shared_weights
+
+    def forward(self, x):
+        x = self.linear(x)
+        # returns the probability distribution of every word through the softmax function
+        return torch.log_softmax(x, dim=-1)
 
     
