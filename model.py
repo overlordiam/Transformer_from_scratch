@@ -8,11 +8,10 @@ class InputEmbedding(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.vocab_size = vocab_size
-        self.embedding = nn.Embedding(d_model, vocab_size)
-        self.shared_weights = self.embedding.weight
+        self.embedding = nn.Embedding(vocab_size, d_model)
 
     def forward(self, x):
-        return self.embedding(x)*math.sqrt(self.d_model), self.shared_weights
+        return self.embedding(x)*math.sqrt(self.d_model)
 
 
 
@@ -77,7 +76,7 @@ class FeedForward(nn.Module):
         return self.linear2(self.dropout(self.relu(self.linear1(x))))
     
 
-class MutliHeadAttention(nn.Module):
+class MultiHeadAttention(nn.Module):
     def __init__(self, h: int, d_model: int, dropout: float):
         super().__init__()
         self.d_model = d_model
@@ -127,7 +126,7 @@ class MutliHeadAttention(nn.Module):
         value = value.view(value.shape[0], self.h, value.shape[1], self.d_k)
 
         # calculate the word representation with position and context (attention)
-        x, self.attention_scores = MutliHeadAttention().attention(query, key, value, mask, self.dropout)
+        x, self.attention_scores = MultiHeadAttention().attention(query, key, value, mask, self.dropout)
 
         # combine the heads to form the original matrix
         x = x.transpose(1, 2).contiguous().view(x.shape[0], -1, self.h*self.d_k) # shape -> (batch, seq_len, d_model)
@@ -148,14 +147,14 @@ class ResidualConnection(nn.Module):
 
 class EncoderBlock(nn.Module):
     # Assemble both the sub layers and apply layer norm to finalize the encoder block
-    def __init__(self, self_attention_block: MutliHeadAttention, feed_forward_block:FeedForward, dropout:float):
+    def __init__(self, self_attention_block: MultiHeadAttention, feed_forward_block:FeedForward, dropout:float):
         super().__init__()
         self.self_attention_block = self_attention_block
         self.feed_forward_block = feed_forward_block
         self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(2)])
 
     def forward(self, x, src_mask):
-        # We apply lambda function so that the MutliHeadAttention object executes inside the residual function,
+        # We apply lambda function so that the MultiHeadAttention object executes inside the residual function,
         # which gives data flow. The feed_forward_block does not need the input as it feeds it inside the ResidualConnection class 
         x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, src_mask))
         x = self.residual_connections[1](x, self.feed_forward_block)
@@ -177,7 +176,7 @@ class Encoder(nn.Module):
     
 class DecoderBlock(nn.Module):
     # assemble a self attention layer, a cross attention layer and a feed forward layer to form the decoder block
-    def __init__(self, self_attention_block: MutliHeadAttention, cross_attention_block: MutliHeadAttention, feed_forward: FeedForward, dropout: float):
+    def __init__(self, self_attention_block: MultiHeadAttention, cross_attention_block: MultiHeadAttention, feed_forward: FeedForward, dropout: float):
         super().__init__()
         self.self_attention_block = self_attention_block
         self.cross_attention_block = cross_attention_block
@@ -218,5 +217,87 @@ class Projection(nn.Module):
         x = self.linear(x)
         # returns the probability distribution of every word through the softmax function
         return torch.log_softmax(x, dim=-1)
+
+    
+class Transformer(nn.Module):
+    # assemble the transformer which includes the 2 main components: encoder and decoder
+
+    def __init__(self, encoder: Encoder, decoder: Decoder, enc_embedding: InputEmbedding, 
+                 dec_embedding: InputEmbedding, enc_pos_embedding: PositionalEmbedding, 
+                 dec_pos_embedding: PositionalEmbedding, projection: Projection):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.enc_embedding = enc_embedding
+        self.dec_embedding = dec_embedding
+        self.enc_pos_embedding = enc_pos_embedding
+        self.dec_pos_embedding = dec_pos_embedding
+        self.projection = projection
+
+    def encode(self, src, src_mask):
+        # initialize the encoder
+        src = self.enc_embedding(src)
+        src = self.enc_pos_embedding(src)
+        src = self.encoder(src, src_mask)
+        return src
+
+    def decode(self, trg, encoder_output, src_mask, trg_mask):
+        # initialize the decoder
+        trg = self.dec_embedding(trg)
+        trg = self.dec_pos_embedding(trg)
+        trg = self.decoder(trg, encoder_output, src_mask, trg_mask)
+        return trg
+    
+    def project(self, x):
+        # final layer that provides output indices
+        return self.projection(x)
+    
+
+def build_transformer(src_vocab: int, trg_vocab: int, src_seq_length: int, trg_seq_length: int,
+                      h: int = 68, d_model: int = 512, N: int = 6, dropout: float = 0.1,
+                      d_ff: int = 2048):
+    # build the transformer
+    
+    src_embedding = InputEmbedding(src_vocab, d_model)
+    shared_weights = src_embedding.weight # weights shared with other embedding layer and final linear layer
+    trg_embedding = InputEmbedding(trg_vocab, d_model)
+    trg_embedding.weight = shared_weights
+
+    src_pos_embedding = PositionalEmbedding(d_model, src_seq_length, dropout)
+    trg_pos_embedding = PositionalEmbedding(d_model, trg_seq_length, dropout)
+
+    # build stack of N encoders 
+    encoder_blocks = []
+    for _ in range(N):
+        self_attention_encoder = MultiHeadAttention(h, d_model, dropout)
+        feed_forward_encoder = FeedForward(d_model, d_ff, dropout)
+        encoder_block = EncoderBlock(self_attention_encoder, feed_forward_encoder, dropout)
+        encoder_blocks.append(encoder_block)
+
+    # build stack of N decoders
+    decoder_blocks = []
+    for _ in range(N):
+        self_attention_decoder = MultiHeadAttention(h, d_model, dropout)
+        cross_attention_decoder = MultiHeadAttention(h, d_model, dropout)
+        feed_forward_decoder = FeedForward(d_model, d_ff, dropout)
+        decoder_block = DecoderBlock(self_attention_decoder, cross_attention_decoder, 
+        feed_forward_decoder, dropout)
+        decoder_blocks.append(decoder_block)
+
+    # assemble encoder and decoder stack
+    encoder = Encoder(nn.ModuleList(encoder_blocks))
+    decoder = Decoder(nn.ModuleList(decoder_blocks))
+
+    projection = Projection(d_model, trg_vocab, shared_weights)
+
+    transformer = Transformer(encoder, decoder, src_embedding, trg_embedding, src_pos_embedding, 
+                              trg_pos_embedding, projection)
+
+    # initialize weights with xavier's
+    for p in transformer.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
+
+    return transformer
 
     
