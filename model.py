@@ -22,24 +22,19 @@ class PositionalEmbedding(nn.Module):
         self.d_model = d_model
         self.seq_length = seq_length
         self.dropout = nn.Dropout(dropout)
-        positional_matrix = torch.zeroes(self.seq_length, self.d_model)
-        position = torch.arange(0, seq_length-1, dtype=torch.float).unsqueeze(-1) # shape --> (seq_length, 1)
-        for pos in position:
-            for i in range(d_model):
-                if i % 2 == 0:
-                    # apply sine to even indices
-                    positional_matrix[pos][i] = torch.sin(pos/self.den(i, self.d_model))
-                else:
-                    # apply cosine to odd indices
-                    positional_matrix[pos][i] = torch.cos(pos/self.den(i, self.d_model))
-
+        position = torch.arange(0, seq_length, dtype=torch.float).unsqueeze(-1) # shape --> (seq_length, 1)
+        even_index = torch.arange(0, d_model, 2)
+        denominator = self.den(even_index, d_model)
+        even_pos, odd_pos = torch.sin(position, denominator), torch.cos(position, denominator)
+        positional_matrix = torch.stack([even_pos, odd_pos], dim=-1)
+        positional_matrix = torch.flatten(positional_matrix, start_dim=-2, end_dim=-1)
         positional_matrix = positional_matrix.unsqueeze(0) # shape --> (batch_size=1, seq_length, d_model)
         # save the positional_matrix values along with the file as it will never change. 
         self.register_buffer("positional_matrix", positional_matrix)  
 
     def den(i: int, d_model: int):
         # denominator for the positional expression as given in paper
-        return 10000**(2*i/d_model)
+        return 10000**(i/d_model)
 
     def forward(self, x):
         # add the positional information to input data
