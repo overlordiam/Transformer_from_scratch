@@ -32,7 +32,7 @@ class PositionalEmbedding(nn.Module):
         # save the positional_matrix values along with the file as it will never change. 
         self.register_buffer("positional_matrix", positional_matrix)  
 
-    def den(i: int, d_model: int):
+    def den(self, i: int, d_model: int):
         # denominator for the positional expression as given in paper
         return 10000**(i/d_model)
 
@@ -98,6 +98,10 @@ class MultiHeadAttention(nn.Module):
 
         # apply -1e9 to any position of tensor where value == 0
         if mask is not None:
+            # mask_ = torch.tril(query.shape[-2], query.shape[-2])
+            # mask_[mask_ == 0] = -1e9
+            # mask_[mask_ == 1] = 0
+            # res = attention_scores + mask_.unsqueeze(0)
             attention_scores.masked_fill_(mask == 0, -1e9)
 
         # apply softmax to the last dimension of input
