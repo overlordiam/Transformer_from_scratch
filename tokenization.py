@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from torch.utils.data import Dataset, DatasetLoader
 
 class Tokenizer(object):
     def __init__(self, english_sentences, kannada_sentences, max_sentence_length, english_vocabulary, kannada_vocabulary):
@@ -10,10 +11,10 @@ class Tokenizer(object):
         self.kannada_vocabulary = kannada_vocabulary
 
     def text_preprocess(self):
-        indices_to_english = {k:v for k, v in enumerate(self.english_vocabulary)}
-        english_to_indices = {v:k for k, v in enumerate(self.english_vocabulary)}
-        kannada_to_indices = {k:v for k, v in enumerate(self.kannada_vocabulary)}
-        indices_to_kannada = {k:v for k, v in enumerate(self.kannada_vocabulary)}
+        self.indices_to_english = {k:v for k, v in enumerate(self.english_vocabulary)}
+        self.english_to_indices = {v:k for k, v in enumerate(self.english_vocabulary)}
+        self.kannada_to_indices = {k:v for k, v in enumerate(self.kannada_vocabulary)}
+        self.indices_to_kannada = {k:v for k, v in enumerate(self.kannada_vocabulary)}
 
         self.english_sentences = [sentence.rstrip() for sentence in self.english_sentences]
         self.kannada_sentences = [sentence.rstrip() for sentence in self.kannada_sentences]
@@ -30,20 +31,38 @@ class Tokenizer(object):
     def valid_sentences(self):
         self.text_preprocess()
         valid_indices = []
-        # print(len(english_sentences), len(kannada_sentences))
         for index in range(len(self.english_sentences)):
             english_sentence, kannada_sentence = self.english_sentences[index], self.kannada_sentences[index]
             if self.is_valid(english_sentence, self.english_vocabulary, self.max_sentence_length) and \
                 self.is_valid(kannada_sentence, self.kannada_vocabulary, self.max_sentence_length):
-                # print(index)
                 valid_indices.append(index)
-        # print(valid_indices[:10])
-            
-        return valid_indices
+
+        self.english_sentences = [self.english_sentences[i] for i in valid_indices]
+        self.kannada_sentences = [self.kannada_sentences[i] for i in valid_indices]
     
+        print(len(self.english_sentences), len(self.kannada_sentences))
 
+    def tokenize(self, sentence, start_token=True, end_token=True):
+        tokenized_sentence = [self.english_to_indices[token] for token in list(sentence)]
+        if start_token:
+            tokenized_sentence.insert(0, self.english_to_indices[START_TOKEN])
+        if end_token:
+            tokenized_sentence.append(self.english_to_indices[END_TOKEN])
+        for _ in range(len(sentence), self.max_sentence_length):
+            tokenized_sentence.append(self.english_to_indices[PADDING_TOKEN])
+        return torch.tensor(tokenized_sentence)
+        
 
+class TextDataset(Dataset):
+    def __init__(self, english_sentences, kannada_sentences):
+        self.english_sentences = english_sentences
+        self.kannada_sentences = kannada_sentences
 
+    def __len__(self):
+        return len(self.english_sentences)
+
+    def __getitem__(self,index):
+        return (self.english_sentences[index], self.kannada_sentences[index])
 
 
 if __name__ == '__main__':
@@ -105,5 +124,4 @@ if __name__ == '__main__':
     
 
                 
-    valid_sentence_indices = tokenizer.valid_sentences()
-    print(len(valid_sentence_indices))
+    tokenizer.valid_sentences()
