@@ -8,20 +8,69 @@ import numpy as np
 # print(torch.__version__)
 
 class InputEmbedding(nn.Module):
-    def __init__(self,):
+    def __init__(self, max_seq_len, d_model):
         super().__init__()
-        self.embedding = nn.Embedding()
+        self.d_model = d_model
+        self.embedding = nn.Embedding(max_seq_len, d_model)
 
     def forward(self, x):
-        pass
+        x = self.embedding(x)
+        return x / np.sqrt(self.d_model)
 
 
-class PositionEncoding(nn.Module):
-    def __init__(self):
+class PositionalEncoding(nn.Module):
+    def __init__(self, max_seq_len, d_model):
         super().__init__()
+        position = torch.arange(max_seq_len).reshape(max_seq_len, 1)
+        even_index = torch.arange(0, d_model, 2).float()
+        denominator = torch.pow(10000, even_index/d_model)
+        odd_pos, even_pos = torch.cos(position / denominator), torch.sin(position / denominator)
+        positional_encoding = torch.stack([even_pos, odd_pos], dim=2)
+        self.positional_encoding = torch.flatten(positional_encoding, start_dim=1, end_dim=2)
 
     def forward(self, x):
-        pass
+        return x + self.positional_encoding
+    
+
+class EmbeddedInput(nn.Module):
+    def __init__(self, d_model, max_seq_len, word_to_index, START_TOKEN, END_TOKEN, PADDING_TOKEN, drop_prob):
+        super().__init__()
+        self.max_seq_len = max_seq_len
+        self.input_embedding = InputEmbedding(max_seq_len, d_model)
+        self.positional_encoding = PositionalEncoding(max_seq_len, d_model)
+        self.word_to_index = word_to_index
+        self.START_TOKEN = START_TOKEN
+        self.END_TOKEN = END_TOKEN
+        self.PADDING_TOKEN = PADDING_TOKEN
+        self.dropout = nn.Dropout(drop_prob)
+
+    def batch_tokenize(self, batch, start_token, end_token):
+        def tokenize(sentence, start_token, end_token):
+            tokenized_sentence = [self.word_to_index(word) for word in list(sentence)]
+            if start_token:
+                tokenized_sentence.insert(0, self.word_to_index[self.START_TOKEN])
+            if end_token:
+                tokenized_sentence.append(self.word_to_index[self.END_TOKEN])
+            for _ in range(len(sentence), self.max_seq_len - 1):
+                tokenized_sentence.append(self.word_to_index[self.PADDING_TOKEN])
+            return torch.tensor(tokenized_sentence)
+        
+        tokenized_sentences = []
+        for num in range(len(batch)):
+            sentence = tokenize(batch[num], start_token, end_token)
+            tokenized_sentences.append(sentence)
+        print("shape of tokenized sentence before stacking: ", tokenized_sentences.shape)
+        tokenized_sentences = torch.stack(tokenized_sentences)
+        print("shape of tokenized sentence after stacking: ", tokenized_sentences.shape)
+        return tokenized_sentences
+
+
+    def forward(self, x, start_token, end_token):
+        x = self.batch_tokenize(x, start_token, end_token)
+        x = self.input_embedding(x, start_token, end_token)
+        x = self.positional_encoding(x)
+        return self.dropout(x)
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, seq_len, num_heads, batch_size):
