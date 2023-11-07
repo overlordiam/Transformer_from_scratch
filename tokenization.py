@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from torch.utils.data import Dataset, DatasetLoader
+from torch.utils.data import Dataset, DataLoader
 
 class Tokenizer(object):
     def __init__(self, english_sentences, kannada_sentences, max_sentence_length, english_vocabulary, kannada_vocabulary):
@@ -40,16 +40,16 @@ class Tokenizer(object):
         self.english_sentences = [self.english_sentences[i] for i in valid_indices]
         self.kannada_sentences = [self.kannada_sentences[i] for i in valid_indices]
     
-        print(len(self.english_sentences), len(self.kannada_sentences))
+        # print(len(self.english_sentences), len(self.kannada_sentences))
 
     def tokenize(self, sentence, start_token=True, end_token=True):
         tokenized_sentence = [self.english_to_indices[token] for token in list(sentence)]
         if start_token:
-            tokenized_sentence.insert(0, self.english_to_indices[START_TOKEN])
+            tokenized_sentence.insert(0, self.english_to_indices['START_TOKEN'])
         if end_token:
-            tokenized_sentence.append(self.english_to_indices[END_TOKEN])
+            tokenized_sentence.append(self.english_to_indices['END_TOKEN'])
         for _ in range(len(sentence), self.max_sentence_length):
-            tokenized_sentence.append(self.english_to_indices[PADDING_TOKEN])
+            tokenized_sentence.append(self.english_to_indices['PADDING_TOKEN'])
         return torch.tensor(tokenized_sentence)
         
 
@@ -70,7 +70,7 @@ if __name__ == '__main__':
     PADDING_TOKEN = ''
     END_TOKEN = ''
 
-    kannada_vocabulary = [START_TOKEN, ' ', '!', '"', '#', '$', '%', '&', "'", '(', ')', '*', '+', ',', '-', '.', '/', 
+    kannada_vocabulary = ['START_TOKEN', ' ', '!', '"', '#', '$', '%', '&', "'", '(', ')', '*', '+', ',', '-', '.', '/', 
                         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', '<', '=', '>', '?', 'ˌ', 
                         'ँ', 'ఆ', 'ఇ', 'ా', 'ి', 'ీ', 'ు', 'ూ', 
                         'ಅ', 'ಆ', 'ಇ', 'ಈ', 'ಉ', 'ಊ', 'ಋ', 'ೠ', 'ಌ', 'ಎ', 'ಏ', 'ಐ', 'ಒ', 'ಓ', 'ಔ', 
@@ -81,9 +81,9 @@ if __name__ == '__main__':
                         'ಪ', 'ಫ', 'ಬ', 'ಭ', 'ಮ', 
                         'ಯ', 'ರ', 'ಱ', 'ಲ', 'ಳ', 'ವ', 'ಶ', 'ಷ', 'ಸ', 'ಹ', 
                         '಼', 'ಽ', 'ಾ', 'ಿ', 'ೀ', 'ು', 'ೂ', 'ೃ', 'ೄ', 'ೆ', 'ೇ', 'ೈ', 'ೊ', 'ೋ', 'ೌ', '್', 'ೕ', 'ೖ', 'ೞ', 'ೣ', 'ಂ', 'ಃ', 
-                        '೦', '೧', '೨', '೩', '೪', '೫', '೬', '೭', '೮', '೯', PADDING_TOKEN, END_TOKEN]
+                        '೦', '೧', '೨', '೩', '೪', '೫', '೬', '೭', '೮', '೯', 'PADDING_TOKEN', 'END_TOKEN']
 
-    english_vocabulary = [START_TOKEN, ' ', '!', '"', '#', '$', '%', '&', "'", '(', ')', '*', '+', ',', '-', '.', '/', 
+    english_vocabulary = ['START_TOKEN', ' ', '!', '"', '#', '$', '%', '&', "'", '(', ')', '*', '+', ',', '-', '.', '/', 
                             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
                             ':', '<', '=', '>', '?', '@', 
                             'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 
@@ -93,7 +93,8 @@ if __name__ == '__main__':
                             'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
                             'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 
                             'y', 'z', 
-                            '{', '|', '}', '~', PADDING_TOKEN, END_TOKEN]
+                            '{', '|', '}', '~', 'PADDING_TOKEN', 'END_TOKEN']
+
 
 
     # print(english_to_indices['b'])
@@ -125,3 +126,5 @@ if __name__ == '__main__':
 
                 
     tokenizer.valid_sentences()
+    # print(english_sentences[0])
+    print(tokenizer.tokenize(tokenizer.english_sentences[0]))
