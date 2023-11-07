@@ -33,7 +33,16 @@ class PositionalEncoding(nn.Module):
     
 
 class EmbeddedInput(nn.Module):
-    def __init__(self, d_model, max_seq_len, word_to_index, START_TOKEN, END_TOKEN, PADDING_TOKEN, drop_prob):
+    def __init__(self, 
+                 d_model, 
+                 max_seq_len, 
+                 word_to_index, 
+                 START_TOKEN, 
+                 END_TOKEN, 
+                 PADDING_TOKEN, 
+                 drop_prob
+                ):
+        
         super().__init__()
         self.max_seq_len = max_seq_len
         self.input_embedding = InputEmbedding(max_seq_len, d_model)
@@ -73,24 +82,23 @@ class EmbeddedInput(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, seq_len, num_heads, batch_size):
+    def __init__(self, d_model, seq_len, num_heads):
         super().__init__()
         self.d_model = d_model
         self.seq_len = seq_len
         assert d_model % num_heads == 0, "d_model is not divisible by num_heads"
         self.d_k = d_model // num_heads
         self.num_heads = num_heads
-        self.batch_size = batch_size
         self.w_q = nn.Linear(d_model, d_model)
         self.w_k = nn.Linear(d_model, d_model)
         self.w_v = nn.Linear(d_model, d_model)
         self.output = nn.Linear(d_model, d_model)
 
-    def attention(self, query, key, value, mask):
+    def attention(self, query, key, value, batch_size, mask):
         q, k, v = self.w_q(query), self.w_k(key), self.w_v(value)
-        q = q.reshape(self.batch_size, self.seq_len, self.num_heads, self.d_k)
-        k = k.reshape(self.batch_size, self.seq_len, self.num_heads, self.d_k)
-        v = v.reshape(self.batch_size, self.seq_len, self.num_heads, self.d_k)
+        q = q.reshape(batch_size, self.seq_len, self.num_heads, self.d_k)
+        k = k.reshape(batch_size, self.seq_len, self.num_heads, self.d_k)
+        v = v.reshape(batch_size, self.seq_len, self.num_heads, self.d_k)
         q, k, v = q.permute(0, 2, 1, 3), k.permute(0, 2, 1, 3), v.permute(0, 2, 1, 3)
         print(q.shape)
         product = q @ k.transpose(-1, -2)
@@ -105,8 +113,9 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, q, k, v, mask=None):
         # batch_size, max_sequence_length, d_model = x.size()
+        batch_size = q.size()[0]
         print(q.size(), k.size(), v.size())
-        x = self.attention(q, k, v, mask)
+        x = self.attention(q, k, v, batch_size, mask)
         x = x.reshape(self.batch_size, self.seq_len, self.num_heads * self.d_k)
         x = self.output(x)
         return x
@@ -144,9 +153,9 @@ class PositionWiseFeedback(nn.Module):
 
 
 class EnocoderBlock(nn.Module):
-    def __init__(self, d_model, seq_len, num_heads, batch_size, d_ff, drop_prob):
+    def __init__(self, d_model, seq_len, num_heads, d_ff, drop_prob):
         super().__init__()
-        self.multi_head_attention = MultiHeadAttention(d_model, seq_len, num_heads, batch_size)
+        self.multi_head_attention = MultiHeadAttention(d_model, seq_len, num_heads)
         self.positionwise_feed_forward = PositionWiseFeedback(d_model, d_ff, drop_prob)
         self.layer_norm = LayerNormalization()
         self.dropout = nn.Dropout(drop_prob)
@@ -158,22 +167,34 @@ class EnocoderBlock(nn.Module):
 
         
 class EncoderSequence(nn.Module):
-    def __init__(self, d_model, max_seq_len, num_heads, batch_size, d_ff, drop_prob, N):
+    def __init__(self, d_model, max_seq_len, num_heads, d_ff, drop_prob, layers):
         super().__init__()
-        self.N = N
-        self.encoder = EnocoderBlock(d_model, max_seq_len, num_heads, batch_size, d_ff, drop_prob)
+        self.layers = layers
+        self.encoder = EnocoderBlock(d_model, max_seq_len, num_heads, d_ff, drop_prob)
 
     def forward(self, x, self_att_mask):
-        for _ in range(self.N):
+        for _ in range(self.layers):
             x = self.encoder(x, self_att_mask)
         return x
 
     
 class Encoder(nn.Module):
-    def __init__(self, d_model, max_seq_len, num_heads, batch_size, d_ff, drop_prob, N, word_to_index, START_TOKEN, END_TOKEN, PADDING_TOKEN):
+    def __init__(self, 
+                 d_model, 
+                 max_seq_len, 
+                 num_heads, 
+                 d_ff, 
+                 drop_prob, 
+                 layers, 
+                 word_to_index, 
+                 START_TOKEN, 
+                 END_TOKEN, 
+                 PADDING_TOKEN
+                ):
+        
         super().__init__()
         self.embedded_input = EmbeddedInput(d_model, max_seq_len, word_to_index, START_TOKEN, END_TOKEN, PADDING_TOKEN, drop_prob)
-        self.embedding_sequence = EncoderSequence(d_model, max_seq_len, num_heads, batch_size, d_ff, drop_prob, N)
+        self.embedding_sequence = EncoderSequence(d_model, max_seq_len, num_heads, d_ff, drop_prob, layers)
     
     def forward(self, x, self_att_mask, start_token, end_token):
         x = self.embedded_input(x, start_token, end_token)
@@ -183,13 +204,13 @@ class Encoder(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, d_model, seq_len, num_heads, batch_size, d_ff, drop_prob):
+    def __init__(self, d_model, seq_len, num_heads, d_ff, drop_prob):
         super().__init__()
-        self.multi_head_self_attention = MultiHeadAttention(d_model, seq_len, num_heads, batch_size)
+        self.multi_head_self_attention = MultiHeadAttention(d_model, seq_len, num_heads)
         self.layer_norm_1 = LayerNormalization()
         self.dropout_1 = nn.Dropout(drop_prob)
 
-        self.multi_head_cross_attention = MultiHeadAttention(d_model, seq_len, num_heads, batch_size)
+        self.multi_head_cross_attention = MultiHeadAttention(d_model, seq_len, num_heads)
         self.layer_norm_2 = LayerNormalization()
         self.dropout_2 = nn.Dropout(drop_prob)
 
@@ -209,22 +230,33 @@ class DecoderBlock(nn.Module):
 
 
 class DecoderSequence(nn.Module):
-    def __init__(self, d_model, seq_len, num_heads, batch_size, d_ff, drop_prob, N):
+    def __init__(self, d_model, seq_len, num_heads, batch_size, d_ff, drop_prob, layers):
         super().__init__()
         self.decoder = DecoderBlock(d_model, seq_len, num_heads, batch_size, d_ff, drop_prob)
-        self.N = N
+        self.layers = layers
 
     def forward(self, x, encoder_output, self_att_mask, cross_att_mask):
-        for _ in range(self.N):
+        for _ in range(self.layers):
             x = self.decoder(x, encoder_output, self_att_mask, cross_att_mask)
         return x
 
 
 class Decoder(nn.Module):
-    def __init__(self, d_model, max_seq_len, num_heads, batch_size, d_ff, drop_prob, N, START_TOKEN, END_TOKEN, PADDING_TOKEN, word_to_index):
+    def __init__(self, 
+                 d_model, 
+                 max_seq_len, 
+                 num_heads, 
+                 d_ff, 
+                 drop_prob, 
+                 layers, 
+                 word_to_index,
+                 START_TOKEN, 
+                 END_TOKEN, 
+                 PADDING_TOKEN
+                ):
         super().__init__()
         self.embedded_input = EmbeddedInput(d_model, max_seq_len, word_to_index, START_TOKEN, END_TOKEN, PADDING_TOKEN, drop_prob)
-        self.decoder_sequence = DecoderSequence(d_model, max_seq_len, num_heads, batch_size, d_ff, drop_prob, N)
+        self.decoder_sequence = DecoderSequence(d_model, max_seq_len, num_heads, d_ff, drop_prob, layers)
 
     def forward(self, x, encoder_output, self_att_mask, cross_att_mask, start_token, end_token):
         x = self.embedded_input(x, start_token, end_token)
@@ -233,11 +265,42 @@ class Decoder(nn.Module):
     
 
 class Transformer(nn.Module):
-    def __init__(self,):
+    def __init__(self, 
+                 d_model, 
+                 max_seq_len, 
+                 num_heads, 
+                 layers, 
+                 d_ff, 
+                 drop_prob, 
+                 english_to_indices, 
+                 kannada_to_indices, 
+                 kannada_vocab_size, 
+                 START_TOKEN, 
+                 END_TOKEN, 
+                 PADDING_TOKEN
+                ):
+        
         super().__init__()
+        self.encoder = Encoder(d_model, max_seq_len, num_heads, d_ff, drop_prob, layers, english_to_indices, START_TOKEN, END_TOKEN, PADDING_TOKEN)
+        self.decoder = Decoder(d_model, max_seq_len, num_heads, d_ff, drop_prob, layers, kannada_to_indices, START_TOKEN, END_TOKEN, PADDING_TOKEN)
+        self.linear = nn.Linear(d_model, kannada_vocab_size)
 
-    def forward(self, ):
-        pass
+    def forward(self, 
+                enc_input, 
+                dec_input, 
+                enc_self_att=None,
+                dec_self_att=None,
+                dec_cross_att=None,
+                enc_start_token=False,
+                enc_end_token=False,
+                dec_start_token=False,
+                dec_end_token=False
+                ):
+        
+        enc_output = self.encoder(enc_input, enc_self_att, enc_start_token, enc_end_token)
+        output = self.decoder(dec_input, enc_output, dec_self_att, dec_cross_att, dec_start_token, dec_end_token)
+        output = self.linear(output)
+        return output
 
 
 if __name__ == '__main__':
@@ -249,7 +312,7 @@ if __name__ == '__main__':
     ffn_hidden = 2048
     num_layers = 5
 
-    encoder = Encoder(d_model, max_sequence_length, num_heads, batch_size, ffn_hidden, drop_prob, num_layers)
+    encoder = Encoder(d_model, max_sequence_length, num_heads, ffn_hidden, drop_prob, num_layers)
 
     x = torch.randn( (batch_size, max_sequence_length, d_model) ) # includes positional encoding
     y = torch.randn( (batch_size, max_sequence_length, d_model) ) 
@@ -259,7 +322,7 @@ if __name__ == '__main__':
     # print(out[0][0])
 
     print("Decoder ----------------------------------------------------")
-    decoder = Decoder(d_model, max_sequence_length, num_heads, batch_size, ffn_hidden, drop_prob, out, num_layers)
+    decoder = Decoder(d_model, max_sequence_length, num_heads, ffn_hidden, drop_prob, out, num_layers)
     final = decoder(y)
     # print(final)
 
